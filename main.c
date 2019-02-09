@@ -26,7 +26,7 @@
 #define TRUE 1
 #define FALSE 0
 
-const char szTargetProcessName[] = "ecryptfs-kthrea";
+const char szTargetProcessName[] = "init";
 
 // Scans proc file system for supplied process name
 __UINTPTR_TYPE__ GetProcessId(const char *szProcessName) {
@@ -140,9 +140,64 @@ __UINTPTR_TYPE__ GetProcessId(const char *szProcessName) {
     return uProcessID;
 }
 
+__UINTPTR_TYPE__ GetProcessBaseAddress(__UINTPTR_TYPE__ uProcessId) {
+    // Create temp buffers
+    char *szMemoryBuffer = (char *)malloc(sizeof(char) * 32);
+    char *szMemoryAddressBuffer = (char *)malloc(sizeof(char) * 32);
+
+    // Create file path
+    char szFilePath[64];
+    sprintf(szFilePath, "/proc/%ld/maps", uProcessId);
+
+    // Open target virtual memory
+    int fd = open(szFilePath, O_RDONLY);
+    if(!fd)
+        return 0;
+
+    // Read memory into buffer
+    read(fd, szMemoryBuffer, sizeof(char) * 32);
+
+    int StatusIndex = 0;
+
+    // Scan map
+    while(TRUE) {
+        // Check for null byte or newline character
+        if(szMemoryBuffer[StatusIndex] == '-' || szMemoryBuffer[StatusIndex] == _NEW_LINE_CHARACTER ||
+        szMemoryBuffer[StatusIndex] == 0) {
+            szMemoryAddressBuffer[StatusIndex] = 0;
+            break;
+        }
+
+            // Read memory to szProcessNameBuffer
+        szMemoryAddressBuffer[StatusIndex] = szMemoryBuffer[StatusIndex];
+        StatusIndex++;
+    }
+
+    // Close fd
+    close(fd);
+
+    // Convert ascii to hex address
+    __UINTPTR_TYPE__ uBaseAddress = (__UINTPTR_TYPE__)(strtol(szMemoryAddressBuffer, NULL, 16));
+
+    // Free memory
+    free(szMemoryBuffer);
+    free(szMemoryAddressBuffer);
+
+    return uBaseAddress;
+}
+
 int main(const int argc, const char *argv[]) {
     __UINTPTR_TYPE__ uProcessId = GetProcessId(szTargetProcessName);
+    if(!uProcessId)
+        return EXIT_FAILURE;
+
     printf("Pid: %ld\n", uProcessId);
+
+    __UINTPTR_TYPE__ uBaseAddress = GetProcessBaseAddress(uProcessId);
+    if(!uBaseAddress)
+        return EXIT_FAILURE;
+
+    printf("Base Address: 0x%lx\n", uBaseAddress);
 
     return EXIT_SUCCESS;
 }
