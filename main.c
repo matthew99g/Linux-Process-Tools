@@ -1,0 +1,148 @@
+// Process ID Finder
+// Matthew Geiger
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <wait.h>
+#include <string.h>
+#include <dirent.h>
+#include <malloc.h>
+#include <sys/types.h>
+#include <sys/ptrace.h>
+#include <sys/stat.h>
+
+#define bool u_int8_t
+
+#define _PROC_FOLDER "/proc/"
+#define _PROC_STATUS "status"
+#define _PROC_STATUS_BUFFER_SIZE 4096
+#define _PROC_STATUS_NAME_OFFSET 0x6
+#define _PROC_STATUS_ID_SIZE 0x4
+
+#define _NEW_LINE_CHARACTER '\n'
+
+#define TRUE 1
+#define FALSE 0
+
+const char szTargetProcessName[] = "ecryptfs-kthrea";
+
+// Scans proc file system for supplied process name
+__UINTPTR_TYPE__ GetProcessId(const char *szProcessName) {
+    // Directory Properties
+    DIR *Directory;
+    struct dirent *DirectoryProperties;
+
+    // Process information buffer
+    char *szStatusBuffer = (char *)malloc(_PROC_STATUS_BUFFER_SIZE);
+    char *szProcessNameBuffer = (char *)malloc(sizeof(char) * 64);
+    char *szProcessIdBuffer = (char *)malloc(sizeof(char) * 64);
+
+    // Change working directory
+    chdir(_PROC_FOLDER);
+
+    // Open and scan proc directory properties
+    Directory = opendir(_PROC_FOLDER);
+    while((DirectoryProperties = readdir(Directory)) != NULL) {
+        // Change CWD to scanned directory
+        chdir(DirectoryProperties->d_name);
+
+        // Define file path
+        char szStatusFileDirectory[64];
+        sprintf(szStatusFileDirectory, "/proc/%ld/status", (unsigned long)(atol(DirectoryProperties->d_name)));
+
+        // Open the status proc member
+        int StatusFd = open(szStatusFileDirectory, O_RDONLY);
+        if(!StatusFd)
+            return 0;
+
+        // Read contents of status to buffer on heap
+        if(!read(StatusFd, szStatusBuffer, _PROC_STATUS_BUFFER_SIZE))
+            return 0;
+
+        // Process name file offset
+        int StatusIndex = _PROC_STATUS_NAME_OFFSET;
+
+        // Define found process name flag
+        bool bFoundNameFlag = FALSE;
+
+        // Scan process name
+        while(TRUE) {
+            // Check for null byte or newline character
+            if(szStatusBuffer[StatusIndex] == 0 || szStatusBuffer[StatusIndex] == _NEW_LINE_CHARACTER) {
+                szProcessNameBuffer[StatusIndex - _PROC_STATUS_NAME_OFFSET] = 0;
+                bFoundNameFlag = TRUE;
+                break;
+            }
+
+            // Read memory to szProcessNameBuffer
+            szProcessNameBuffer[StatusIndex - _PROC_STATUS_NAME_OFFSET] = szStatusBuffer[StatusIndex];
+            StatusIndex++;
+        }
+
+        // Create section check buffer
+        char szProcIdCheckBuffer[64];
+
+        // Scan process id
+        if(bFoundNameFlag && !strcmp(szProcessName, szProcessNameBuffer)) {
+            // Proc id section
+            int iMainIndex = 0;
+
+            // Scan for "Pid:"
+            while(TRUE) {
+                for(unsigned int i = 0; i < _PROC_STATUS_ID_SIZE + 1; i++) {
+                    szProcIdCheckBuffer[i] = szStatusBuffer[iMainIndex];
+                    iMainIndex++; 
+                }
+
+                szProcIdCheckBuffer[_PROC_STATUS_ID_SIZE] = 0;
+
+                if(!strcmp(szProcIdCheckBuffer, "Pid:"))
+                    break;
+
+                iMainIndex -= 4;
+            }
+
+            // Scan process id
+            int iMainPidIndex = iMainIndex;
+            int iPidIndex = 0;
+            while(TRUE) {
+                if(szStatusBuffer[iMainPidIndex] == 0 || szStatusBuffer[iMainPidIndex] == _NEW_LINE_CHARACTER) {
+                    szProcessIdBuffer[iPidIndex] = 0;
+                    bFoundNameFlag = TRUE;
+                    break;
+                }
+
+                szProcessIdBuffer[iPidIndex] = szStatusBuffer[iMainPidIndex]; 
+                iPidIndex++;
+                iMainPidIndex++;
+            }
+            break;
+        }
+
+        // Close status file descriptor
+        close(StatusFd);
+    }
+
+    // Close directory descriptor
+    closedir(Directory);
+
+    // Define process id
+    __UINTPTR_TYPE__ uProcessID = (__UINTPTR_TYPE__)(atol(szProcessIdBuffer));
+
+    // Free memory
+    free(szStatusBuffer);
+    free(szProcessNameBuffer);
+    free(szProcessIdBuffer);
+
+    // Return process id
+    return uProcessID;
+}
+
+int main(const int argc, const char *argv[]) {
+    __UINTPTR_TYPE__ uProcessId = GetProcessId(szTargetProcessName);
+    printf("Pid: %ld\n", uProcessId);
+
+    return EXIT_SUCCESS;
+}
