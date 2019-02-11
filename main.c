@@ -168,7 +168,7 @@ __UINTPTR_TYPE__ GetProcessBaseAddress(__UINTPTR_TYPE__ uProcessId) {
             break;
         }
 
-            // Read memory to szProcessNameBuffer
+        // Read memory to szProcessNameBuffer
         szMemoryAddressBuffer[StatusIndex] = szMemoryBuffer[StatusIndex];
         StatusIndex++;
     }
@@ -186,6 +186,20 @@ __UINTPTR_TYPE__ GetProcessBaseAddress(__UINTPTR_TYPE__ uProcessId) {
     return uBaseAddress;
 }
 
+bool ReadProcessMemory(int fd, __UINTPTR_TYPE__ uProcessId, __UINTPTR_TYPE__ uAddress, void *buffer, unsigned int size) {
+    if(!pread(fd, buffer, size, uAddress))
+        return FALSE;
+
+    return TRUE;
+}
+
+bool WriteProcessMemory(int fd, __UINTPTR_TYPE__ uProcessId, __UINTPTR_TYPE__ uAddress, void *buffer, unsigned int size) {
+    if(!pwrite(fd, buffer, size, uAddress))
+        return FALSE;
+
+    return TRUE;
+}
+
 int main(const int argc, const char *argv[]) {
     __UINTPTR_TYPE__ uProcessId = GetProcessId(szTargetProcessName);
     if(!uProcessId)
@@ -198,6 +212,27 @@ int main(const int argc, const char *argv[]) {
         return EXIT_FAILURE;
 
     printf("Base Address: 0x%lx\n", uBaseAddress);
+
+    // Start ptrace
+    ptrace(PTRACE_ATTACH, uProcessId, NULL, NULL);
+
+    char szVirtualMem[64];
+    sprintf(szVirtualMem, "/proc/%ld/mem", uProcessId);
+
+    int fd = open(szVirtualMem, O_RDWR);
+    if(!fd)
+        return EXIT_FAILURE;
+
+    char szMemoryBuffer[64];
+
+    if(!ReadProcessMemory(fd, uProcessId, uBaseAddress, (void *)szMemoryBuffer, 4))
+        return EXIT_FAILURE;
+
+    for(int i = 0; i < 4; i++)
+        printf("0x%02x | %c\n", szMemoryBuffer[i], szMemoryBuffer[i]);
+
+    // End ptrace
+    ptrace(PTRACE_DETACH, uProcessId, NULL, NULL);
 
     return EXIT_SUCCESS;
 }
